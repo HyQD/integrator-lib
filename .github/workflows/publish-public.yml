@@ -1,0 +1,39 @@
+name: Publish public repository
+
+on:
+  push:
+    branches:
+      - public-release
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout public-release
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure publishing key
+        env:
+          PUBLIC_REPO_DEPLOY_KEY: ${{ secrets.PUBLIC_REPO_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$PUBLIC_REPO_DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          cat >> ~/.ssh/known_hosts <<'EOF'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          EOF
+
+      - name: Publish to integrator-lib
+        run: |
+          git remote add public-publish git@github.com:HyQD/integrator-lib.git
+          git push public-publish HEAD:main
