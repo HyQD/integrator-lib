@@ -8,9 +8,9 @@ quantum-dynamics model.
 The public API contains:
 
 - `RK4`: classical four-stage, fourth-order Runge--Kutta integration.
-- `CNCMF1`: first-order Crank--Nicolson propagation with a frozen
+- `IMCMF1`: first-order implicit-midpoint propagation with a frozen
   state-dependent operator.
-- `CNCMF2`: second-order predictor-corrector Crank--Nicolson propagation
+- `IMCMF2`: second-order predictor-corrector implicit-midpoint propagation
   with a predicted midpoint-frozen operator.
 - `CrankNicolson`: matrix-free implicit midpoint/Crank--Nicolson integration
   using SciPy GMRES or BiCGSTAB, with optional preconditioning.
@@ -35,7 +35,7 @@ python -m pip install --no-build-isolation -e ".[dev]"
 ## Usage
 
 ```python
-from integrator_lib import CNCMF1, CNCMF2, CrankNicolson, RK4, Strang2
+from integrator_lib import IMCMF1, IMCMF2, CrankNicolson, RK4, Strang2
 
 integrator = Strang2(
     linear_integrator=CrankNicolson(
@@ -64,7 +64,7 @@ variables.
 
 ## Constant-mean-field propagation
 
-`CNCMF1` and `CNCMF2` receive a callback that separates construction of a
+`IMCMF1` and `IMCMF2` receive a callback that separates construction of a
 state-dependent operator from its linear action:
 
 ```python
@@ -77,23 +77,23 @@ def freeze(reference_state):
     return linear_rhs
 ```
 
-`CNCMF1` freezes at the beginning of each interval and performs one
-Crank--Nicolson step. `CNCMF2` first predicts the midpoint, freezes there, and
-then restarts from the initial state and performs two corrector half-steps.
-The midpoint predictor may use one half-step or two quarter-steps:
+`IMCMF1` freezes at the beginning of each interval and performs one
+implicit-midpoint step. `IMCMF2` takes one predictor half-step, freezes at the
+predicted midpoint, and then restarts from the initial state. The corrector
+may use one whole step or two half-steps:
 
 ```python
-integrator = CNCMF2(
+integrator = IMCMF2(
     predictor_integrator,
     corrector_integrator,
-    predictor_steps=2,
+    corrector_steps=2,
 )
 new_state = integrator(state, time, time_step, freeze)
 ```
 
 Separate predictor and corrector integrators allow their preconditioners to
-match their respective substep sizes. Krylov iteration counts and residual
-norms are recorded separately for the predictor and corrector steps.
+match their respective step sizes. Krylov iteration counts and residual norms
+are recorded separately for the predictor and corrector steps.
 
 ## Development
 

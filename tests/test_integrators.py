@@ -5,7 +5,7 @@ import pytest
 from scipy.linalg import expm
 from scipy.sparse.linalg import LinearOperator
 
-from integrator_lib import CNCMF1, CNCMF2, CrankNicolson, RK4, Strang2
+from integrator_lib import IMCMF1, IMCMF2, CrankNicolson, RK4, Strang2
 
 
 def test_rk4_time_dependent_rhs_and_input_preservation():
@@ -153,7 +153,7 @@ def test_integrators_reject_shape_changing_right_hand_sides():
         CrankNicolson()(np.ones(2), 0.0, 0.1, lambda y, t: np.ones(3))
 
 
-def test_cncmf1_freezes_once_and_matches_a_frozen_cayley_step():
+def test_imcmf1_freezes_once_and_matches_a_frozen_cayley_step():
     state = np.array([1.0 + 0.2j, -0.3 + 0.4j])
     original = state.copy()
     matrix = np.array([[0.4, 0.1j], [-0.1j, -0.2]])
@@ -169,7 +169,7 @@ def test_cncmf1_freezes_once_and_matches_a_frozen_cayley_step():
         ) @ trial
 
     crank_nicolson = CrankNicolson(rtol=1e-13, atol=1e-15)
-    integrator = CNCMF1(crank_nicolson)
+    integrator = IMCMF1(crank_nicolson)
     result = integrator(state, time, dt, freeze)
 
     midpoint = time + dt / 2
@@ -202,14 +202,14 @@ class RecordingLinearStep:
 
 
 @pytest.mark.parametrize(
-    ("predictor_steps", "expected_calls"),
+    ("corrector_steps", "expected_calls"),
     [
-        (1, [(2.0, 0.4)]),
-        (2, [(2.0, 0.2), (2.2, 0.2)]),
+        (1, [(2.0, 0.8)]),
+        (2, [(2.0, 0.4), (2.4, 0.4)]),
     ],
 )
-def test_cncmf2_predictor_steps_and_frozen_midpoint_corrector(
-    predictor_steps, expected_calls
+def test_imcmf2_corrector_steps_and_frozen_midpoint_operator(
+    corrector_steps, expected_calls
 ):
     predictor = RecordingLinearStep()
     corrector = RecordingLinearStep()
@@ -222,38 +222,34 @@ def test_cncmf2_predictor_steps_and_frozen_midpoint_corrector(
 
     state = np.array([1.0])
     original = state.copy()
-    integrator = CNCMF2(
+    integrator = IMCMF2(
         predictor,
         corrector,
-        predictor_steps=predictor_steps,
+        corrector_steps=corrector_steps,
     )
     integrator(state, 2.0, 0.8, freeze)
 
-    assert [(t, h) for t, h, _ in predictor.calls] == expected_calls
-    assert [(t, h) for t, h, _ in corrector.calls] == [
-        (2.0, 0.4),
-        (2.4, 0.4),
-    ]
+    assert [(t, h) for t, h, _ in predictor.calls] == [(2.0, 0.4)]
+    assert [(t, h) for t, h, _ in corrector.calls] == expected_calls
     assert len(references) == 2
     np.testing.assert_array_equal(references[0], state)
-    expected_midpoint = (1 + 0.4 / predictor_steps) ** predictor_steps
-    np.testing.assert_allclose(references[1], [expected_midpoint])
+    np.testing.assert_allclose(references[1], [1.4])
     np.testing.assert_array_equal(state, original)
-    assert integrator.last_predictor_iterations == tuple(
-        range(1, predictor_steps + 1)
+    assert integrator.last_predictor_iterations == (1,)
+    assert integrator.last_corrector_iterations == tuple(
+        range(1, corrector_steps + 1)
     )
-    assert integrator.last_corrector_iterations == (1, 2)
-    assert len(integrator.last_predictor_residual_norms) == predictor_steps
-    assert len(integrator.last_corrector_residual_norms) == 2
+    assert len(integrator.last_predictor_residual_norms) == 1
+    assert len(integrator.last_corrector_residual_norms) == corrector_steps
 
 
-def _propagate_cncmf2(n_steps, predictor_steps=2):
+def _propagate_imcmf2(n_steps, corrector_steps):
     state = np.array([1.0])
     dt = 0.2 / n_steps
-    integrator = CNCMF2(
+    integrator = IMCMF2(
         CrankNicolson(rtol=1e-13, atol=1e-15),
         CrankNicolson(rtol=1e-13, atol=1e-15),
-        predictor_steps=predictor_steps,
+        corrector_steps=corrector_steps,
     )
 
     def freeze(reference):
@@ -265,26 +261,31 @@ def _propagate_cncmf2(n_steps, predictor_steps=2):
     return abs(state[0] - 1.25)
 
 
-def test_cncmf2_has_second_order_convergence_for_state_dependent_operator():
-    errors = np.array([_propagate_cncmf2(n) for n in (4, 8, 16)])
+@pytest.mark.parametrize("corrector_steps", [1, 2])
+def test_imcmf2_has_second_order_convergence_for_state_dependent_operator(
+    corrector_steps,
+):
+    errors = np.array(
+        [_propagate_imcmf2(n, corrector_steps) for n in (4, 8, 16)]
+    )
     ratios = errors[:-1] / errors[1:]
     assert np.all((3.7 < ratios) & (ratios < 4.3))
 
 
-@pytest.mark.parametrize("predictor_steps", [0, 3])
-def test_cncmf2_rejects_unsupported_predictor_step_count(predictor_steps):
-    with pytest.raises(ValueError, match="predictor_steps"):
-        CNCMF2(RK4(), RK4(), predictor_steps=predictor_steps)
+@pytest.mark.parametrize("corrector_steps", [0, 3])
+def test_imcmf2_rejects_unsupported_corrector_step_count(corrector_steps):
+    with pytest.raises(ValueError, match="corrector_steps"):
+        IMCMF2(RK4(), RK4(), corrector_steps=corrector_steps)
 
 
-@pytest.mark.parametrize("predictor_steps", [True, 1.0, "2"])
-def test_cncmf2_rejects_noninteger_predictor_step_count(predictor_steps):
-    with pytest.raises(TypeError, match="predictor_steps"):
-        CNCMF2(RK4(), RK4(), predictor_steps=predictor_steps)
+@pytest.mark.parametrize("corrector_steps", [True, 1.0, "2"])
+def test_imcmf2_rejects_noninteger_corrector_step_count(corrector_steps):
+    with pytest.raises(TypeError, match="corrector_steps"):
+        IMCMF2(RK4(), RK4(), corrector_steps=corrector_steps)
 
 
-def test_cncmf_integrators_validate_freeze_callback():
+def test_imcmf_integrators_validate_freeze_callback():
     with pytest.raises(TypeError, match="freeze"):
-        CNCMF1(RK4())(np.ones(2), 0.0, 0.1, None)
+        IMCMF1(RK4())(np.ones(2), 0.0, 0.1, None)
     with pytest.raises(TypeError, match="return a callable"):
-        CNCMF2(RK4(), RK4())(np.ones(2), 0.0, 0.1, lambda state: state)
+        IMCMF2(RK4(), RK4())(np.ones(2), 0.0, 0.1, lambda state: state)
