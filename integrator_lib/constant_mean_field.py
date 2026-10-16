@@ -27,8 +27,8 @@ def _frozen_rhs(freeze, reference_state):
     return rhs
 
 
-class CNCMF1:
-    r"""First-order constant-mean-field Crank--Nicolson propagation.
+class IMCMF1:
+    r"""First-order constant-mean-field implicit-midpoint propagation.
 
     ``freeze(reference_state)`` must return a linear right-hand side with
     signature ``rhs(trial_state, time)``. The returned operator is frozen at
@@ -65,16 +65,17 @@ class CNCMF1:
         return result
 
 
-class CNCMF2:
+class IMCMF2:
     r"""Second-order predictor-corrector constant-mean-field propagation.
 
-    A predictor advances from ``t`` to ``t + step_size/2`` with the operator
-    frozen at the initial state. The predicted midpoint state is then frozen,
-    and the corrector restarts from the initial state and takes two
-    Crank--Nicolson half-steps over the complete interval.
+    One predictor half-step advances from ``t`` to ``t + step_size/2`` with
+    the operator frozen at the initial state. The predicted midpoint state is
+    then frozen, and the corrector restarts from the initial state and covers
+    the complete interval with one whole step or two half-steps.
 
-    ``predictor_steps`` selects either one predictor half-step or two predictor
-    quarter-steps. Both use the same operator frozen at the initial state.
+    ``corrector_steps`` selects one whole corrector step or two corrector
+    half-steps. Both choices use the same operator frozen at the predicted
+    midpoint state.
 
     Parameters
     ----------
@@ -82,9 +83,9 @@ class CNCMF2:
         Step callables with signature ``step(state, time, step_size, rhs)``.
         Separate objects allow their preconditioners to match the predictor
         and corrector substep sizes.
-    predictor_steps : {1, 2}, optional
-        Number of Crank--Nicolson steps used to reach the predicted midpoint.
-        Defaults to two.
+    corrector_steps : {1, 2}, optional
+        Number of implicit-midpoint steps used to cover the complete corrector
+        interval. Defaults to two.
     """
 
     def __init__(
@@ -92,22 +93,22 @@ class CNCMF2:
         predictor_integrator,
         corrector_integrator,
         *,
-        predictor_steps=2,
+        corrector_steps=2,
     ):
         if not callable(predictor_integrator):
             raise TypeError("predictor_integrator must be callable.")
         if not callable(corrector_integrator):
             raise TypeError("corrector_integrator must be callable.")
-        if isinstance(predictor_steps, (bool, np.bool_)) or not isinstance(
-            predictor_steps, (Integral, np.integer)
+        if isinstance(corrector_steps, (bool, np.bool_)) or not isinstance(
+            corrector_steps, (Integral, np.integer)
         ):
-            raise TypeError("predictor_steps must be 1 or 2.")
-        predictor_steps = int(predictor_steps)
-        if predictor_steps not in {1, 2}:
-            raise ValueError("predictor_steps must be 1 or 2.")
+            raise TypeError("corrector_steps must be 1 or 2.")
+        corrector_steps = int(corrector_steps)
+        if corrector_steps not in {1, 2}:
+            raise ValueError("corrector_steps must be 1 or 2.")
         self.predictor_integrator = predictor_integrator
         self.corrector_integrator = corrector_integrator
-        self.predictor_steps = predictor_steps
+        self.corrector_steps = corrector_steps
         self.last_predictor_iterations = ()
         self.last_predictor_residual_norms = ()
         self.last_corrector_iterations = ()
@@ -126,28 +127,21 @@ class CNCMF2:
         self.last_corrector_residual_norms = ()
 
         initial_rhs = _frozen_rhs(freeze, values)
-        predictor = values
-        predictor_step = step_size / (2 * self.predictor_steps)
-        predictor_iterations = []
-        predictor_residuals = []
-        for substep in range(self.predictor_steps):
-            predictor = _step(
-                self.predictor_integrator,
-                predictor,
-                time + substep * predictor_step,
-                predictor_step,
-                initial_rhs,
-            )
-            iterations, residual = _linear_diagnostics(self.predictor_integrator)
-            predictor_iterations.append(iterations)
-            predictor_residuals.append(residual)
+        predictor = _step(
+            self.predictor_integrator,
+            values,
+            time,
+            step_size / 2,
+            initial_rhs,
+        )
+        predictor_diagnostics = _linear_diagnostics(self.predictor_integrator)
 
         midpoint_rhs = _frozen_rhs(freeze, predictor)
         corrector = values
-        corrector_step = step_size / 2
+        corrector_step = step_size / self.corrector_steps
         corrector_iterations = []
         corrector_residuals = []
-        for substep in range(2):
+        for substep in range(self.corrector_steps):
             corrector = _step(
                 self.corrector_integrator,
                 corrector,
@@ -159,8 +153,8 @@ class CNCMF2:
             corrector_iterations.append(iterations)
             corrector_residuals.append(residual)
 
-        self.last_predictor_iterations = tuple(predictor_iterations)
-        self.last_predictor_residual_norms = tuple(predictor_residuals)
+        self.last_predictor_iterations = (predictor_diagnostics[0],)
+        self.last_predictor_residual_norms = (predictor_diagnostics[1],)
         self.last_corrector_iterations = tuple(corrector_iterations)
         self.last_corrector_residual_norms = tuple(corrector_residuals)
         return corrector
