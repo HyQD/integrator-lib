@@ -40,6 +40,56 @@ def test_crank_nicolson_matches_cayley_step_and_preserves_norm(solver):
     assert integrator.last_residual_norm < 1e-12
 
 
+@pytest.mark.parametrize("solver", ["gmres", "bicgstab"])
+def test_crank_nicolson_matches_real_imaginary_time_cayley_step(solver):
+    hamiltonian = np.array([[1.2, -0.3], [-0.3, 0.7]])
+    state = np.array([1.0, -0.4])
+    original = state.copy()
+    dt = 0.11
+    rhs_dtypes = []
+    preconditioner_dtypes = []
+
+    def imaginary_time_rhs(values, time):
+        del time
+        rhs_dtypes.append(values.dtype)
+        return -hamiltonian @ values
+
+    def preconditioner(values):
+        preconditioner_dtypes.append(values.dtype)
+        return values
+
+    integrator = CrankNicolson(
+        solver=solver,
+        rtol=1e-13,
+        atol=1e-15,
+        preconditioner=preconditioner,
+    )
+
+    result = integrator(
+        state,
+        0.0,
+        dt,
+        imaginary_time_rhs,
+    )
+
+    identity = np.eye(2)
+    expected = np.linalg.solve(
+        identity + 0.5 * dt * hamiltonian,
+        (identity - 0.5 * dt * hamiltonian) @ state,
+    )
+    np.testing.assert_allclose(result, expected, atol=2e-13, rtol=2e-13)
+    np.testing.assert_array_equal(state, original)
+    assert np.issubdtype(result.dtype, np.floating)
+    assert rhs_dtypes
+    assert all(np.issubdtype(dtype, np.floating) for dtype in rhs_dtypes)
+    assert preconditioner_dtypes
+    assert all(
+        np.issubdtype(dtype, np.floating) for dtype in preconditioner_dtypes
+    )
+    assert integrator.last_iterations > 0
+    assert integrator.last_residual_norm < 1e-12
+
+
 def test_crank_nicolson_evaluates_at_the_interval_midpoint():
     times = []
 
@@ -47,8 +97,9 @@ def test_crank_nicolson_evaluates_at_the_interval_midpoint():
         times.append(time)
         return -1j * time * state
 
-    CrankNicolson(rtol=1e-13)(np.ones(3), 1.2, 0.4, linear_rhs)
+    result = CrankNicolson(rtol=1e-13)(np.ones(3), 1.2, 0.4, linear_rhs)
     np.testing.assert_allclose(times, 1.4)
+    assert np.issubdtype(result.dtype, np.complexfloating)
 
 
 def test_crank_nicolson_accepts_shaped_preconditioner():
