@@ -25,7 +25,9 @@ class CrankNicolson:
 
     Thus, for ``i dy/dt = H(t)y``, supply ``linear_rhs = -1j * H``. The
     callback is required to be linear in its state argument. Arrays may have
-    any nonempty shape and are flattened only inside the Krylov solver.
+    any nonempty shape and are flattened only inside the Krylov solver. Real
+    states remain real when the right-hand side is real and are promoted to
+    complex when the right-hand side is complex.
 
     Parameters
     ----------
@@ -88,7 +90,7 @@ class CrankNicolson:
         self.last_iterations = None
         self.last_residual_norm = None
 
-    def _preconditioner(self, shape):
+    def _preconditioner(self, shape, dtype):
         if self.preconditioner is None:
             return None
         size = int(np.prod(shape))
@@ -103,7 +105,7 @@ class CrankNicolson:
             result = self.preconditioner(vector.reshape(shape))
             return matching_array(result, shape, "preconditioner").ravel()
 
-        return LinearOperator((size, size), matvec=matvec, dtype=np.complex128)
+        return LinearOperator((size, size), matvec=matvec, dtype=dtype)
 
     def __call__(self, state, time, step_size, linear_rhs: Callable):
         """Advance one implicit midpoint step without modifying *state*."""
@@ -120,14 +122,18 @@ class CrankNicolson:
             result = linear_rhs(argument, midpoint)
             return matching_array(result, shape, "linear_rhs")
 
-        rhs = values + 0.5 * step_size * evaluate(values)
+        initial_action = evaluate(values)
+        dtype = np.result_type(values.dtype, initial_action.dtype)
+        values = np.asarray(values, dtype=dtype)
+        initial_action = np.asarray(initial_action, dtype=dtype)
+        rhs = values + 0.5 * step_size * initial_action
 
         def matvec(vector):
             argument = vector.reshape(shape)
             return (argument - 0.5 * step_size * evaluate(argument)).ravel()
 
         matrix = LinearOperator(
-            (size, size), matvec=matvec, dtype=np.complex128
+            (size, size), matvec=matvec, dtype=dtype
         )
         iteration_count = 0
 
@@ -137,7 +143,7 @@ class CrankNicolson:
 
         kwargs = {
             "x0": values.ravel(),
-            "M": self._preconditioner(shape),
+            "M": self._preconditioner(shape, dtype),
             "rtol": self.rtol,
             "atol": self.atol,
             "maxiter": self.maxiter,

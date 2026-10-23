@@ -25,7 +25,13 @@ def positive_real(value, name, *, allow_zero=False):
 
 
 def state_array(state):
-    """Return a finite complex state array without modifying the input."""
+    """Return a finite floating-point state array without modifying the input.
+
+    Real-valued input remains real while complex-valued input is represented
+    as complex.  Both paths use double precision so integrators can avoid the
+    memory and arithmetic cost of complex states when the differential
+    equation is real-valued.
+    """
     array = np.asarray(state)
     if not np.issubdtype(array.dtype, np.number):
         raise TypeError("state must be a numeric array.")
@@ -33,7 +39,8 @@ def state_array(state):
         raise ValueError("state must have at least one dimension.")
     if not np.all(np.isfinite(array)):
         raise ValueError("state must contain only finite values.")
-    return np.asarray(array, dtype=np.complex128)
+    dtype = np.complex128 if np.iscomplexobj(array) else np.float64
+    return np.asarray(array, dtype=dtype)
 
 
 def matching_array(value, shape, name):
@@ -45,4 +52,5 @@ def matching_array(value, shape, name):
         raise ValueError(f"{name} must preserve the state shape {shape}.")
     if not np.all(np.isfinite(array)):
         raise ValueError(f"{name} must return only finite values.")
-    return np.asarray(array, dtype=np.complex128)
+    dtype = np.complex128 if np.iscomplexobj(array) else np.float64
+    return np.asarray(array, dtype=dtype)

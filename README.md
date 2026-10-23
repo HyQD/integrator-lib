@@ -58,6 +58,17 @@ new_state = integrator(
 Every right-hand side returns a time derivative. For an equation written as
 `i dy/dt = H(t)y`, the corresponding callable returns `-1j * H(t)y`.
 
+For imaginary-time propagation, `dstate/dtau = -H state`, pass a real-valued
+right-hand side returning `-H(state)`. `CrankNicolson` then applies
+
+```text
+(I + dt H / 2) state_new = (I - dt H / 2) state
+```
+
+without promoting a real state to complex arithmetic. Normalization and
+ground-state convergence criteria belong to the calling application rather
+than the generic time integrator.
+
 `Strang2` treats its state as an opaque object. Its component steppers may
 therefore evolve a NumPy array or a compound state containing several coupled
 variables.
