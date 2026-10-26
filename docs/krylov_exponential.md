@@ -199,3 +199,6 @@ The methods should be compared using total accepted-step cost, operator-call
 count, memory use, norm or absorber behavior, and observable convergence. A
 smaller Krylov dimension or iteration count alone does not determine the most
 efficient propagator.
+
+The deterministic exact-matrix comparisons are documented in
+[SIL and SIA validation](krylov_validation.md).
