@@ -31,6 +31,7 @@ The public API contains:
 - [Integrator interface and conventions](docs/integrator_interface.md)
 - [Crank--Nicolson propagation](docs/crank_nicolson.md)
 - [Short-iterative Lanczos and Arnoldi propagation](docs/krylov_exponential.md)
+- [SIL and SIA validation](docs/krylov_validation.md)
 
 ## Installation
 

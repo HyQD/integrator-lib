@@ -13,6 +13,7 @@ algorithms currently intended for time-dependent quantum dynamics:
 - [Integrator interface and conventions](integrator_interface.md)
 - [Crank--Nicolson propagation](crank_nicolson.md)
 - [Short-iterative Lanczos and Arnoldi propagation](krylov_exponential.md)
+- [SIL and SIA validation](krylov_validation.md)
 
 The Krylov page documents both short-iterative Lanczos (SIL) and
 short-iterative Arnoldi (SIA). In the public Python API, SIA is implemented by
