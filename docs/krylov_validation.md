@@ -37,9 +37,22 @@ approximately:
 Halving the step reduces the error by approximately four, as expected for a
 second-order method.
 
+## Imaginary-time Hermitian exponential
+
+The second Hermitian reference shifts the same matrix to a positive spectrum
+and evaluates `exp(-tau * H) @ state` directly. SIL is configured with
+`generator_factor=-1.0`; SIA consumes the generator `-H` without additional
+configuration. Both reproduce the exact matrix exponential to floating-point
+precision when the four-dimensional Krylov space spans the complete problem.
+
+The state norm decreases in this test by construction. The validation does
+not renormalize after each step because its purpose is to verify the
+exponential action itself. Ground-state solvers may normalize and evaluate
+their convergence criteria after accepting each imaginary-time step.
+
 ## CAP-like non-Hermitian generator
 
-The second problem adds a nonnegative diagonal absorber $W$ and propagates
+The CAP-like problem adds a nonnegative diagonal absorber $W$ and propagates
 with
 
 $$
@@ -86,6 +99,7 @@ approximation error.
 These tests establish that:
 
 - SIL evaluates a Hermitian exponential correctly;
+- SIL evaluates both real- and imaginary-time Hermitian exponentials;
 - SIA evaluates both Hermitian and CAP-like non-Hermitian exponentials;
 - Crank--Nicolson converges to the same reference propagators;
 - SIA retains physical absorber-induced norm loss;

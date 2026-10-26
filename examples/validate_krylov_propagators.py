@@ -7,7 +7,8 @@ Run from the repository root with::
 The deterministic four-state problems are deliberately small enough that the
 reference propagators can be formed with ``scipy.linalg.expm``. They exercise
 a constant Hermitian Hamiltonian, a CAP-like non-Hermitian generator, and a
-commuting time-dependent Hamiltonian sampled at temporal midpoints.
+constant imaginary-time Hermitian exponential, and a commuting time-dependent
+Hamiltonian sampled at temporal midpoints.
 """
 
 import numpy as np
@@ -122,6 +123,38 @@ def print_cap_validation():
     print(f"Exact final norm: {exact_norm:.8e}\n")
 
 
+def print_imaginary_time_validation():
+    positive_hamiltonian = HAMILTONIAN + 2.0 * np.eye(HAMILTONIAN.shape[0])
+    exact = expm(-FINAL_TIME * positive_hamiltonian) @ INITIAL_STATE
+    rhs = lambda state, time: -positive_hamiltonian @ state
+    methods = (
+        (
+            "Lanczos",
+            lambda: ShortIterativeLanczos(
+                generator_factor=-1.0,
+                max_krylov_dimension=4,
+                rtol=1.0e-13,
+                atol=1.0e-15,
+            ),
+        ),
+        ("Arnoldi", sia),
+    )
+
+    print("Constant Hermitian Hamiltonian in imaginary time")
+    print("method              dt          state error        final norm")
+    print("-" * 66)
+    for name, factory in methods:
+        for n_steps in STEP_COUNTS:
+            state = propagate(factory(), rhs, n_steps)
+            error = np.linalg.norm(state - exact)
+            norm = np.vdot(state, state).real
+            print(
+                f"{name:18s} {FINAL_TIME / n_steps:8.3f} "
+                f"{error:18.8e} {norm:16.8e}"
+            )
+    print()
+
+
 def time_dependent_scale(time):
     return 1.0 + 0.3 * time + 0.2 * time**2
 
@@ -162,5 +195,6 @@ def print_midpoint_validation():
 
 if __name__ == "__main__":
     print_hermitian_validation()
+    print_imaginary_time_validation()
     print_cap_validation()
     print_midpoint_validation()

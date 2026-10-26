@@ -4,7 +4,7 @@
 
 | Method | Public class | Operator assumption | Typical use |
 | --- | --- | --- | --- |
-| Short-iterative Lanczos (SIL) | `ShortIterativeLanczos` | Hermitian Hamiltonian | Closed TDSE propagation without a CAP |
+| Short-iterative Lanczos (SIL) | `ShortIterativeLanczos` | Hermitian Hamiltonian | Real- or imaginary-time propagation without a CAP |
 | Short-iterative Arnoldi (SIA) | `ArnoldiExponential` | General linear generator | TDSE propagation with a CAP or another non-Hermitian term |
 
 Both methods construct a small Krylov projection using repeated calls to the
@@ -24,8 +24,9 @@ $$
 \exp(-i\Delta t T_m)e_1.
 $$
 
-The public callable follows the common derivative convention and therefore
-receives `-1j * H @ state`, not `H @ state` directly:
+For real-time propagation, the public callable follows the common derivative
+convention and therefore receives `-1j * H @ state`, not `H @ state`
+directly:
 
 ```python
 from integrator_lib import ShortIterativeLanczos
@@ -50,12 +51,65 @@ new_state = integrator(
 )
 ```
 
-The implementation recovers the Hamiltonian action as `1j * linear_rhs` and
-checks that the Lanczos diagonal is real to numerical precision under the
-configured inner product.
+The default `generator_factor=-1j` lets the implementation recover the
+Hamiltonian action from the derivative. It checks that the Lanczos diagonal
+is real to numerical precision under the configured inner product.
 
 SIL must not be used when a CAP or another non-Hermitian contribution is
 present. Use SIA instead.
+
+## Imaginary-time exponential actions
+
+For imaginary-time propagation, use `generator_factor=-1.0` and supply the
+derivative `-H @ state`:
+
+```python
+integrator = ShortIterativeLanczos(
+    generator_factor=-1.0,
+    max_krylov_dimension=20,
+    rtol=1.0e-10,
+    atol=0.0,
+    max_refinements=8,
+    reorthogonalize=True,
+    inner_product=representation.inner_product,
+)
+
+def imaginary_time_rhs(values, imaginary_time):
+    return -apply_hamiltonian(values, imaginary_time)
+
+filtered_state = integrator(
+    state,
+    imaginary_time,
+    imaginary_time_step,
+    imaginary_time_rhs,
+)
+```
+
+This evaluates `exp(-imaginary_time_step * H) @ state`. For a real
+Hamiltonian and real input state, SIL retains real arithmetic. The integrator
+does not normalize the result or decide whether a ground state has converged;
+those policies belong to the calling application.
+
+SIA can evaluate the same action without special configuration because it
+works directly with the supplied generator:
+
+```python
+integrator = ArnoldiExponential(
+    max_krylov_dimension=20,
+    rtol=1.0e-10,
+)
+filtered_state = integrator(
+    state,
+    imaginary_time,
+    imaginary_time_step,
+    imaginary_time_rhs,
+)
+```
+
+For a Hermitian Hamiltonian, SIL is preferred because its tridiagonal
+projection uses less storage and orthogonalization work than Arnoldi. A CAP is
+normally not part of ground-state imaginary-time filtering; if a genuinely
+non-Hermitian generator is required, use SIA.
 
 ## Short-iterative Arnoldi
 
