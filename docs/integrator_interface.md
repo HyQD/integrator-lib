@@ -30,6 +30,13 @@ def linear_rhs(state, time):
 This convention is shared by `CrankNicolson`, `ShortIterativeLanczos`, and
 `ArnoldiExponential`.
 
+For imaginary time, the evolution equation is
+`d Psi / d tau = -H(tau) Psi`, so the callback returns `-H @ state`.
+`CrankNicolson` and `ArnoldiExponential` consume that derivative directly.
+`ShortIterativeLanczos` additionally needs `generator_factor=-1.0` so it can
+recover the Hermitian Hamiltonian used to construct the Lanczos projection.
+Its default `generator_factor=-1j` retains the real-time convention.
+
 ## State arrays
 
 States may have any nonempty NumPy-compatible shape. The integrators preserve
@@ -70,6 +77,11 @@ An integrator advances the supplied state. It does not:
 Those policies belong to the calling package. A CAP is part of the operator
 action and makes the effective Hamiltonian non-Hermitian, which affects the
 choice between SIL and SIA.
+
+In particular, an imaginary-time Krylov step intentionally returns the
+unnormalized exponential action. Normalization, orthogonalization against
+previously found states, symmetry-sector selection, and ground-state
+convergence tests belong to the calling application.
 
 ## Compound algorithms
 

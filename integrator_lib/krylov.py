@@ -215,18 +215,45 @@ class _KrylovExponential:
 
 
 class ShortIterativeLanczos(_KrylovExponential):
-    r"""Short-iterative Lanczos propagation for Hermitian TDSE Hamiltonians.
+    r"""Short-iterative Lanczos action of a Hermitian-operator exponential.
 
-    ``linear_rhs(state, time)`` must represent the anti-Hermitian TDSE
-    generator ``-1j * H(time) @ state``, where ``H`` is Hermitian under the
-    configured inner product. The Hamiltonian is sampled at the midpoint of
-    each accepted or refined substep.
+    ``linear_rhs(state, time)`` must represent
+    ``generator_factor * H(time) @ state``, where ``H`` is Hermitian under the
+    configured inner product. The default ``generator_factor=-1j`` gives
+    real-time TDSE propagation. Set ``generator_factor=-1.0`` for the
+    imaginary-time exponential ``exp(-step_size * H)``. The operator is
+    sampled at the midpoint of each accepted or refined substep.
 
     The Krylov approximation is increased up to ``max_krylov_dimension``.
     Its convergence estimate is formed from the endpoint Krylov residual. If
     it does not meet ``atol + rtol*norm``, the time interval is bisected
     recursively up to ``max_refinements`` times.
     """
+
+    def __init__(
+        self,
+        *,
+        max_krylov_dimension=20,
+        rtol=1.0e-10,
+        atol=0.0,
+        max_refinements=8,
+        reorthogonalize=True,
+        inner_product=None,
+        breakdown_tolerance=1.0e-14,
+        generator_factor=-1j,
+    ):
+        super().__init__(
+            max_krylov_dimension=max_krylov_dimension,
+            rtol=rtol,
+            atol=atol,
+            max_refinements=max_refinements,
+            reorthogonalize=reorthogonalize,
+            inner_product=inner_product,
+            breakdown_tolerance=breakdown_tolerance,
+        )
+        self.generator_factor = _nonzero_finite_numeric_scalar(
+            generator_factor, "generator_factor"
+        )
 
     def _krylov_step(
         self,
@@ -262,7 +289,7 @@ class ShortIterativeLanczos(_KrylovExponential):
             derivative = matching_array(
                 linear_rhs(argument, midpoint), shape, "linear_rhs"
             )
-            return 1j * derivative
+            return derivative / self.generator_factor
 
         basis = [state / initial_norm]
         alphas = []
@@ -282,7 +309,7 @@ class ShortIterativeLanczos(_KrylovExponential):
             if abs(alpha.imag) > 1.0e-10 * alpha_scale:
                 raise ValueError(
                     "ShortIterativeLanczos requires a Hermitian Hamiltonian "
-                    "under the configured inner product."
+                    "or operator under the configured inner product."
                 )
             alpha = float(alpha.real)
             alphas.append(alpha)
@@ -290,9 +317,12 @@ class ShortIterativeLanczos(_KrylovExponential):
 
             if self.reorthogonalize:
                 for basis_vector in basis:
-                    residual = residual - (
-                        self._inner(basis_vector, residual) * basis_vector
-                    )
+                    coefficient = self._inner(basis_vector, residual)
+                    if not np.iscomplexobj(residual) and not np.iscomplexobj(
+                        basis_vector
+                    ):
+                        coefficient = coefficient.real
+                    residual = residual - coefficient * basis_vector
 
             beta = self._norm(residual)
             dimension = index + 1
@@ -302,13 +332,15 @@ class ShortIterativeLanczos(_KrylovExponential):
                 projected += np.diag(off_diagonal, 1)
                 projected += np.diag(off_diagonal, -1)
             coefficients = initial_norm * expm(
-                -1j * step_size * projected
+                self.generator_factor * step_size * projected
             )[:, 0]
             approximation = self._linear_combination(
                 basis, coefficients, shape
             )
             residual_estimate = (
-                abs(step_size) * beta * abs(coefficients[-1])
+                abs(self.generator_factor * step_size)
+                * beta
+                * abs(coefficients[-1])
             )
             error, tolerance, converged = self._convergence(
                 approximation,
@@ -456,3 +488,17 @@ def _integer(value, name, *, minimum):
     if value < minimum:
         raise ValueError(f"{name} must be at least {minimum}.")
     return value
+
+
+def _nonzero_finite_numeric_scalar(value, name):
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a nonzero finite numeric scalar.")
+    array = np.asarray(value)
+    if array.ndim != 0 or not np.issubdtype(array.dtype, np.number):
+        raise TypeError(f"{name} must be a nonzero finite numeric scalar.")
+    result = complex(array)
+    if not np.isfinite(result):
+        raise ValueError(f"{name} must be a nonzero finite numeric scalar.")
+    if result == 0.0:
+        raise ValueError(f"{name} must be nonzero.")
+    return result.real if result.imag == 0.0 else result

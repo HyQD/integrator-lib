@@ -62,6 +62,30 @@ def test_sil_and_sia_match_exact_constant_hermitian_propagation():
         assert np.vdot(state, state).real == pytest.approx(1.0, abs=2.0e-13)
 
 
+def test_lanczos_and_arnoldi_match_exact_imaginary_time_propagation():
+    final_imaginary_time = 0.7
+    positive_hamiltonian = HAMILTONIAN + 2.0 * np.eye(HAMILTONIAN.shape[0])
+    exact = (
+        expm(-final_imaginary_time * positive_hamiltonian) @ INITIAL_STATE
+    )
+    rhs = lambda state, time: -positive_hamiltonian @ state
+    lanczos = ShortIterativeLanczos(
+        generator_factor=-1.0,
+        max_krylov_dimension=4,
+        rtol=1.0e-13,
+        atol=1.0e-15,
+    )
+
+    for integrator in (lanczos, _sia()):
+        state = _propagate(
+            integrator,
+            rhs,
+            n_steps=5,
+            final_time=final_imaginary_time,
+        )
+        np.testing.assert_allclose(state, exact, atol=2.0e-13, rtol=2.0e-13)
+
+
 def test_crank_nicolson_has_second_order_cayley_error_for_constant_hamiltonian():
     exact = expm(-1j * HAMILTONIAN) @ INITIAL_STATE
     rhs = lambda state, time: -1j * HAMILTONIAN @ state

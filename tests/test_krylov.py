@@ -19,6 +19,7 @@ HERMITIAN = np.array(
     dtype=complex,
 )
 STATE = np.array([1.0 + 0.2j, -0.3 + 0.4j, 0.1 - 0.2j, 0.7])
+POSITIVE_HERMITIAN = HERMITIAN + 2.0 * np.eye(HERMITIAN.shape[0])
 
 
 @pytest.mark.parametrize("reorthogonalize", [False, True])
@@ -74,6 +75,57 @@ def test_arnoldi_matches_exact_nonhermitian_exponential():
     np.testing.assert_allclose(result, expected, atol=2.0e-13, rtol=2.0e-13)
     assert np.linalg.norm(result) < np.linalg.norm(STATE)
     assert integrator.last_attempts[0].breakdown
+
+
+@pytest.mark.parametrize(
+    "integrator",
+    [
+        ShortIterativeLanczos(
+            generator_factor=-1.0,
+            max_krylov_dimension=4,
+            rtol=1.0e-13,
+            atol=1.0e-15,
+        ),
+        ArnoldiExponential(
+            max_krylov_dimension=4,
+            rtol=1.0e-13,
+            atol=1.0e-15,
+        ),
+    ],
+)
+def test_krylov_propagators_match_exact_imaginary_time_exponential(integrator):
+    step_size = 0.6
+    rhs = lambda values, time: -POSITIVE_HERMITIAN @ values
+
+    result = integrator(STATE, 0.0, step_size, rhs)
+
+    expected = expm(-step_size * POSITIVE_HERMITIAN) @ STATE
+    np.testing.assert_allclose(result, expected, atol=2.0e-13, rtol=2.0e-13)
+    assert np.linalg.norm(result) < np.linalg.norm(STATE)
+    assert integrator.last_attempts[0].breakdown
+
+
+def test_imaginary_time_lanczos_preserves_real_arithmetic():
+    hamiltonian = np.array([[1.0, -0.2], [-0.2, 1.5]])
+    state = np.array([1.0, -0.4])
+    integrator = ShortIterativeLanczos(
+        generator_factor=-1.0,
+        max_krylov_dimension=2,
+        rtol=1.0e-13,
+        atol=1.0e-15,
+    )
+
+    result = integrator(
+        state,
+        0.0,
+        0.3,
+        lambda values, time: -hamiltonian @ values,
+    )
+
+    assert not np.iscomplexobj(result)
+    np.testing.assert_allclose(
+        result, expm(-0.3 * hamiltonian) @ state, atol=1.0e-13
+    )
 
 
 @pytest.mark.parametrize("factory", [ShortIterativeLanczos, ArnoldiExponential])
@@ -224,6 +276,18 @@ def test_krylov_zero_state_and_zero_step(factory):
         (
             lambda: ArnoldiExponential(breakdown_tolerance=0.0),
             "breakdown_tolerance",
+        ),
+        (
+            lambda: ShortIterativeLanczos(generator_factor=0.0),
+            "generator_factor",
+        ),
+        (
+            lambda: ShortIterativeLanczos(generator_factor=np.inf),
+            "generator_factor",
+        ),
+        (
+            lambda: ShortIterativeLanczos(generator_factor=True),
+            "generator_factor",
         ),
     ],
 )

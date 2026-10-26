@@ -16,7 +16,8 @@ algorithms currently intended for time-dependent quantum dynamics:
 - [SIL and SIA validation](krylov_validation.md)
 
 The Krylov page documents both short-iterative Lanczos (SIL) and
-short-iterative Arnoldi (SIA). In the public Python API, SIA is implemented by
+short-iterative Arnoldi (SIA), including real- and imaginary-time exponential
+actions. In the public Python API, SIA is implemented by
 `ArnoldiExponential`.
 
 Runnable usage fragments are included in the feature pages. The test suite
