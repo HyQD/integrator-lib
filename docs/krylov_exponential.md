@@ -170,12 +170,33 @@ The callable must accept two state-shaped arrays and return a finite scalar.
 Self-inner-products must be real to numerical precision and nonnegative. The
 Krylov vectors are orthonormalized using this same inner product.
 
+Distributed representations can additionally supply `inner_products`. It
+accepts a sequence of left vectors and one right vector and returns the
+one-dimensional array of corresponding inner products:
+
+```python
+integrator = ShortIterativeLanczos(
+    inner_product=representation.inner_product,
+    inner_products=representation.inner_products,
+)
+```
+
+SIL uses this callback for its full-basis reorthogonalization, while SIA uses
+it for each orthogonalization pass. This permits a distributed caller to
+reduce the complete coefficient vector with one collective instead of one
+collective per basis vector. Norms and scalar recurrence coefficients continue
+to use `inner_product`. If `inner_products` is omitted, the integrators retain
+the scalar behavior by evaluating `inner_product` separately for every vector.
+
+The integrators reuse their linear-combination work array while expanding one
+Krylov subspace instead of allocating a new approximation at every dimension.
+
 ## Reorthogonalization
 
 Set `reorthogonalize=True` to improve numerical orthogonality:
 
 - SIL applies a full correction against the stored Lanczos basis;
-- SIA performs a second modified Gram--Schmidt pass.
+- SIA performs a second Gram--Schmidt pass.
 
 Disabling reorthogonalization reduces inner-product work but can allow loss of
 orthogonality for large Krylov spaces or difficult spectra. Accuracy and cost

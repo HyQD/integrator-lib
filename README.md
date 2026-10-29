@@ -207,6 +207,21 @@ integrator = ShortIterativeLanczos(
 )
 ```
 
+An optional batched callback reduces orthogonalization synchronization for
+distributed representations:
+
+```python
+integrator = ShortIterativeLanczos(
+    inner_product=representation.inner_product,
+    inner_products=representation.inner_products,
+)
+```
+
+`inner_products(left_vectors, right)` returns one inner product for every left
+vector. When omitted, the scalar `inner_product` callback is used separately
+for every vector. The linear-combination work array is reused while expanding
+one Krylov subspace.
+
 The most recent call records diagnostics in `last_attempts`. Aggregate values
 are also available as:
 

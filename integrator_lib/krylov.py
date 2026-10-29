@@ -40,6 +40,7 @@ class _KrylovExponential:
         max_refinements=8,
         reorthogonalize=True,
         inner_product=None,
+        inner_products=None,
         breakdown_tolerance=1.0e-14,
     ):
         self.max_krylov_dimension = _integer(
@@ -56,8 +57,11 @@ class _KrylovExponential:
             raise TypeError("reorthogonalize must be boolean.")
         if inner_product is not None and not callable(inner_product):
             raise TypeError("inner_product must be callable or None.")
+        if inner_products is not None and not callable(inner_products):
+            raise TypeError("inner_products must be callable or None.")
         self.reorthogonalize = bool(reorthogonalize)
         self.inner_product = np.vdot if inner_product is None else inner_product
+        self.inner_products = inner_products
         self.breakdown_tolerance = positive_real(
             breakdown_tolerance, "breakdown_tolerance"
         )
@@ -176,9 +180,28 @@ class _KrylovExponential:
             raise ValueError("inner_product must return a finite scalar.")
         return value
 
-    def _linear_combination(self, basis, coefficients, shape):
+    def _inners(self, left, right):
+        if self.inner_products is None:
+            return np.asarray([self._inner(vector, right) for vector in left])
+        values = np.asarray(self.inner_products(left, right))
+        expected = (len(left),)
+        if values.shape != expected or not np.issubdtype(values.dtype, np.number):
+            raise TypeError(
+                "inner_products must return a numeric one-dimensional array "
+                f"with shape {expected}."
+            )
+        values = np.asarray(values, dtype=complex)
+        if not np.isfinite(values).all():
+            raise ValueError("inner_products must return only finite values.")
+        return values
+
+    def _linear_combination(self, basis, coefficients, shape, out=None):
         dtype = np.result_type(*(vector.dtype for vector in basis), coefficients.dtype)
-        result = np.zeros(shape, dtype=dtype)
+        if out is None or out.shape != shape or out.dtype != dtype:
+            result = np.empty(shape, dtype=dtype)
+        else:
+            result = out
+        result.fill(0)
         for coefficient, vector in zip(coefficients, basis, strict=True):
             result += coefficient * vector
         return result
@@ -239,6 +262,7 @@ class ShortIterativeLanczos(_KrylovExponential):
         max_refinements=8,
         reorthogonalize=True,
         inner_product=None,
+        inner_products=None,
         breakdown_tolerance=1.0e-14,
         generator_factor=-1j,
     ):
@@ -249,6 +273,7 @@ class ShortIterativeLanczos(_KrylovExponential):
             max_refinements=max_refinements,
             reorthogonalize=reorthogonalize,
             inner_product=inner_product,
+            inner_products=inner_products,
             breakdown_tolerance=breakdown_tolerance,
         )
         self.generator_factor = _nonzero_finite_numeric_scalar(
@@ -316,8 +341,10 @@ class ShortIterativeLanczos(_KrylovExponential):
             residual = residual - alpha * vector
 
             if self.reorthogonalize:
-                for basis_vector in basis:
-                    coefficient = self._inner(basis_vector, residual)
+                coefficients = self._inners(basis, residual)
+                for basis_vector, coefficient in zip(
+                    basis, coefficients, strict=True
+                ):
                     if not np.iscomplexobj(residual) and not np.iscomplexobj(
                         basis_vector
                     ):
@@ -335,7 +362,10 @@ class ShortIterativeLanczos(_KrylovExponential):
                 self.generator_factor * step_size * projected
             )[:, 0]
             approximation = self._linear_combination(
-                basis, coefficients, shape
+                basis,
+                coefficients,
+                shape,
+                out=approximation,
             )
             residual_estimate = (
                 abs(self.generator_factor * step_size)
@@ -432,8 +462,10 @@ class ArnoldiExponential(_KrylovExponential):
             residual = generator_action(basis[index])
             passes = 2 if self.reorthogonalize else 1
             for _ in range(passes):
-                for row, basis_vector in enumerate(basis):
-                    coefficient = self._inner(basis_vector, residual)
+                coefficients = self._inners(basis, residual)
+                for row, (basis_vector, coefficient) in enumerate(
+                    zip(basis, coefficients, strict=True)
+                ):
                     hessenberg[row, index] += coefficient
                     residual = residual - coefficient * basis_vector
 
@@ -443,7 +475,10 @@ class ArnoldiExponential(_KrylovExponential):
             projected = hessenberg[:dimension, :dimension]
             coefficients = initial_norm * expm(step_size * projected)[:, 0]
             approximation = self._linear_combination(
-                basis, coefficients, shape
+                basis,
+                coefficients,
+                shape,
+                out=approximation,
             )
             residual_estimate = (
                 abs(step_size) * beta * abs(coefficients[-1])
