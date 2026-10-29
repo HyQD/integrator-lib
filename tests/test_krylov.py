@@ -158,6 +158,56 @@ def test_krylov_propagators_support_weighted_inner_products(factory):
     np.testing.assert_allclose(result, expected, atol=3.0e-13, rtol=3.0e-13)
 
 
+@pytest.mark.parametrize("factory", [ShortIterativeLanczos, ArnoldiExponential])
+def test_krylov_propagators_batch_orthogonalization_inner_products(factory):
+    scalar_calls = []
+    batch_sizes = []
+
+    def inner_product(left, right):
+        scalar_calls.append(1)
+        return np.vdot(left, right)
+
+    def inner_products(left, right):
+        batch_sizes.append(len(left))
+        return np.asarray([np.vdot(vector, right) for vector in left])
+
+    integrator = factory(
+        max_krylov_dimension=4,
+        rtol=1.0e-13,
+        atol=1.0e-15,
+        inner_product=inner_product,
+        inner_products=inner_products,
+    )
+    result = integrator(
+        STATE,
+        0.0,
+        0.4,
+        lambda values, time: -1j * HERMITIAN @ values,
+    )
+
+    expected = expm(-0.4j * HERMITIAN) @ STATE
+    np.testing.assert_allclose(result, expected, atol=3.0e-13, rtol=3.0e-13)
+    assert scalar_calls
+    assert batch_sizes
+    assert max(batch_sizes) > 1
+
+
+@pytest.mark.parametrize("factory", [ShortIterativeLanczos, ArnoldiExponential])
+def test_krylov_validates_batched_inner_product_result(factory):
+    integrator = factory(
+        max_krylov_dimension=2,
+        inner_products=lambda left, right: 0.0,
+    )
+
+    with pytest.raises(TypeError, match="inner_products must return"):
+        integrator(
+            STATE,
+            0.0,
+            0.1,
+            lambda values, time: -1j * HERMITIAN @ values,
+        )
+
+
 @pytest.mark.parametrize(
     "factory",
     [ShortIterativeLanczos, ArnoldiExponential],
@@ -273,6 +323,7 @@ def test_krylov_zero_state_and_zero_step(factory):
         (lambda: ShortIterativeLanczos(rtol=0.0, atol=0.0), "At least one"),
         (lambda: ArnoldiExponential(reorthogonalize=1), "boolean"),
         (lambda: ShortIterativeLanczos(inner_product=1), "inner_product"),
+        (lambda: ArnoldiExponential(inner_products=1), "inner_products"),
         (
             lambda: ArnoldiExponential(breakdown_tolerance=0.0),
             "breakdown_tolerance",
