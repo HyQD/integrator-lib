@@ -1,4 +1,4 @@
-# Short-iterative Lanczos and Arnoldi propagation
+# Krylov exponential and phi-function actions
 
 `integrator-lib` provides two matrix-free exponential propagators:
 
@@ -10,6 +10,9 @@
 Both methods construct a small Krylov projection using repeated calls to the
 supplied operator. Only the projected matrix is exponentiated explicitly.
 Neither method requires a preconditioner.
+
+The same module provides `LanczosPhi1` and `ArnoldiPhi1` for matrix-free
+actions of the first exponential-integrator phi function.
 
 ## Short-iterative Lanczos
 
@@ -155,6 +158,83 @@ $$
 The non-Hermitian Arnoldi projection permits the physical norm loss produced
 by $W$.
 
+## First phi-function actions
+
+The classes `LanczosPhi1` and `ArnoldiPhi1` approximate
+
+$$
+\Delta t\,\varphi_1(\Delta t L)v,
+\qquad
+\varphi_1(z)=\frac{\exp(z)-1}{z},
+\qquad
+\varphi_1(0)=1,
+$$
+
+without constructing $L$. In a Krylov basis $V_m$ with projected operator
+$K_m$, the action is
+
+$$
+\Delta t\,\lVert v\rVert V_m
+\varphi_1(\Delta t K_m)e_1.
+$$
+
+Only the small projected phi function is evaluated explicitly. Its action is
+formed through an augmented matrix exponential, which remains well-defined
+when the projected operator is singular and avoids cancellation near zero.
+
+For a Hermitian Hamiltonian and the imaginary-time generator $L=-H$:
+
+```python
+from integrator_lib import LanczosPhi1
+
+action = LanczosPhi1(
+    generator_factor=-1.0,
+    max_krylov_dimension=30,
+    rtol=1.0e-10,
+    inner_product=representation.inner_product,
+    inner_products=representation.inner_products,
+)
+
+result = action(
+    vector,
+    imaginary_time,
+    imaginary_time_step,
+    lambda values, time: -apply_hamiltonian(values, time),
+)
+```
+
+`LanczosPhi1` checks that the Hamiltonian recovered by dividing the supplied
+generator by `generator_factor` is Hermitian under the configured inner
+product. `ArnoldiPhi1` instead consumes a general `linear_rhs` directly:
+
+```python
+from integrator_lib import ArnoldiPhi1
+
+action = ArnoldiPhi1(max_krylov_dimension=30, rtol=1.0e-10)
+result = action(vector, time, time_step, linear_rhs)
+```
+
+Both classes sample the operator at `time + 0.5 * time_step`, preserve the
+input shape, leave the input unchanged, and support the weighted and batched
+inner-product callbacks described below.
+
+The residual-based estimate is compared with
+
+$$
+\mathrm{atol}+\mathrm{rtol}\max\left(
+|\Delta t|\lVert v\rVert,
+\lVert\Delta t\varphi_1(\Delta t L)v\rVert
+\right).
+$$
+
+Unlike homogeneous exponential propagation, a phi-function action cannot be
+refined by merely applying the same action successively over half intervals.
+Consequently these primitives do not expose `max_refinements`. Reaching
+`max_krylov_dimension` without meeting the tolerance raises
+`KrylovConvergenceError`; the failed attempt remains available through the
+normal diagnostics. The caller may increase the Krylov dimension or reduce
+the requested step size.
+
 ## Weighted inner products
 
 The default inner product is `numpy.vdot`. A discretized wavefunction may
@@ -276,4 +356,4 @@ smaller Krylov dimension or iteration count alone does not determine the most
 efficient propagator.
 
 The deterministic exact-matrix comparisons are documented in
-[SIL and SIA validation](krylov_validation.md).
+[Krylov exponential and phi-function validation](krylov_validation.md).

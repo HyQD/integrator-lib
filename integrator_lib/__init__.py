@@ -4,8 +4,10 @@ from .constant_mean_field import IMCMF1, IMCMF2
 from .crank_nicolson import CrankNicolson, LinearSolveError
 from .krylov import (
     ArnoldiExponential,
+    ArnoldiPhi1,
     KrylovAttempt,
     KrylovConvergenceError,
+    LanczosPhi1,
     ShortIterativeLanczos,
 )
 from .runge_kutta import RK4
@@ -16,8 +18,10 @@ __all__ = [
     "IMCMF2",
     "CrankNicolson",
     "ArnoldiExponential",
+    "ArnoldiPhi1",
     "KrylovAttempt",
     "KrylovConvergenceError",
+    "LanczosPhi1",
     "LinearSolveError",
     "RK4",
     "Strang2",
