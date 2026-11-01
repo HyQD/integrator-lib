@@ -1,4 +1,4 @@
-# SIL and SIA validation
+# Krylov exponential and phi-function validation
 
 The SIL and SIA implementations are validated on deterministic systems small
 enough for direct matrix exponentiation. These checks separate Krylov
@@ -12,6 +12,8 @@ python examples/validate_krylov_propagators.py
 ```
 
 The same expectations are enforced by `tests/test_krylov_validation.py`.
+Additional dense phi-function references are enforced by
+`tests/test_phi1.py`.
 
 ## Constant Hermitian Hamiltonian
 
@@ -67,6 +69,26 @@ Crank--Nicolson remains applicable and converges quadratically to the same
 non-Hermitian exponential. SIL is intentionally excluded because the
 effective Hamiltonian is not Hermitian.
 
+## First phi-function actions
+
+The phi-function tests evaluate
+
+$$
+h\varphi_1(hL)v
+$$
+
+from one augmented dense matrix exponential. Full-space Lanczos and Arnoldi
+actions reproduce this independent reference to floating-point precision for
+Hermitian and non-Hermitian generators, respectively. The tests also cover:
+
+- real-valued imaginary-time arithmetic;
+- weighted and batched inner products;
+- midpoint operator sampling and multidimensional state shapes;
+- zero vectors and zero step sizes;
+- rejection of a non-Hermitian operator by Lanczos;
+- explicit failure when an undersized Krylov space misses its tolerance;
+- an accepted incomplete Krylov space checked against the dense result.
+
 ## Time-dependent midpoint sampling
 
 The final problem uses the commuting time-dependent Hamiltonian
@@ -101,6 +123,7 @@ These tests establish that:
 - SIL evaluates a Hermitian exponential correctly;
 - SIL evaluates both real- and imaginary-time Hermitian exponentials;
 - SIA evaluates both Hermitian and CAP-like non-Hermitian exponentials;
+- Lanczos and Arnoldi evaluate first-phi-function actions correctly;
 - Crank--Nicolson converges to the same reference propagators;
 - SIA retains physical absorber-induced norm loss;
 - midpoint evaluation produces the intended second-order temporal behavior.

@@ -19,10 +19,14 @@ The public API contains:
   propagation.
 - `ArnoldiExponential`: short-iterative Arnoldi (SIA) propagation for a
   general, possibly non-Hermitian linear generator.
+- `LanczosPhi1`: matrix-free action of the first exponential-integrator
+  phi function for a Hermitian operator.
+- `ArnoldiPhi1`: matrix-free action of the first exponential-integrator
+  phi function for a general linear generator.
 - `Strang2`: second-order symmetric `A/2 - B - A/2` composition.
 - `LinearSolveError`: raised when an iterative Crank--Nicolson solve fails.
-- `KrylovConvergenceError`: raised when exponential propagation does not
-  converge after its configured step refinements.
+- `KrylovConvergenceError`: raised when an exponential or phi-function Krylov
+  action does not meet its requested tolerance.
 
 ## Documentation
 
@@ -31,8 +35,8 @@ The public API contains:
 - [Runtime dependencies](docs/runtime_dependencies.md)
 - [Integrator interface and conventions](docs/integrator_interface.md)
 - [Crank--Nicolson propagation](docs/crank_nicolson.md)
-- [Short-iterative Lanczos and Arnoldi propagation](docs/krylov_exponential.md)
-- [SIL and SIA validation](docs/krylov_validation.md)
+- [Krylov exponential and phi-function actions](docs/krylov_exponential.md)
+- [Krylov exponential and phi-function validation](docs/krylov_validation.md)
 
 ## Installation
 
@@ -241,6 +245,48 @@ Step refinement controls Krylov projection error. For a genuinely
 time-dependent operator, midpoint sampling still gives a second-order temporal
 approximation, and the calling application remains responsible for selecting
 or controlling the physical time-step error.
+
+## Krylov phi-function actions
+
+`LanczosPhi1` and `ArnoldiPhi1` evaluate
+
+```text
+time_step * phi_1(time_step * L) @ state,
+phi_1(z) = (exp(z) - 1) / z,
+```
+
+without forming `L`. They use the same state shapes, midpoint sampling,
+weighted inner products, batched inner products, and diagnostics as the
+exponential propagators:
+
+```python
+from integrator_lib import LanczosPhi1
+
+phi1_action = LanczosPhi1(
+    generator_factor=-1.0,
+    max_krylov_dimension=30,
+    rtol=1e-10,
+    inner_product=representation.inner_product,
+    inner_products=representation.inner_products,
+)
+
+def imaginary_time_rhs(state, imaginary_time):
+    return -apply_stiff_operator(state, imaginary_time)
+
+filtered_residual = phi1_action(
+    residual,
+    imaginary_time,
+    imaginary_time_step,
+    imaginary_time_rhs,
+)
+```
+
+The Lanczos variant requires a Hermitian operator before multiplication by
+`generator_factor`; Arnoldi accepts a general generator. A phi-function action
+does not compose by applying the same action successively on smaller
+intervals, so these primitives do not perform automatic step refinement. If
+the maximum Krylov dimension does not meet the tolerance, they raise
+`KrylovConvergenceError` and retain the failed attempt in `last_attempts`.
 
 ## Development
 

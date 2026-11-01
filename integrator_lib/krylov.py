@@ -1,4 +1,4 @@
-"""Matrix-free exponential propagation in Krylov subspaces."""
+"""Matrix-free exponential and phi-function actions in Krylov subspaces."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,12 +10,12 @@ from ._validation import finite_real, matching_array, positive_real, state_array
 
 
 class KrylovConvergenceError(RuntimeError):
-    """Raised when Krylov propagation fails after all step refinements."""
+    """Raised when a Krylov action fails to meet its requested tolerance."""
 
 
 @dataclass(frozen=True)
 class KrylovAttempt:
-    """Diagnostics for one attempted exponential substep."""
+    """Diagnostics for one attempted exponential or phi-function action."""
 
     time: float
     step_size: float
@@ -235,6 +235,88 @@ class _KrylovExponential:
         else:
             self.last_krylov_dimension = 0
             self.last_error_estimate = None
+
+
+class _KrylovPhi1(_KrylovExponential):
+    """Shared call and diagnostics machinery for Krylov phi_1 actions."""
+
+    def __init__(
+        self,
+        *,
+        max_krylov_dimension=20,
+        rtol=1.0e-10,
+        atol=0.0,
+        reorthogonalize=True,
+        inner_product=None,
+        inner_products=None,
+        breakdown_tolerance=1.0e-14,
+    ):
+        super().__init__(
+            max_krylov_dimension=max_krylov_dimension,
+            rtol=rtol,
+            atol=atol,
+            max_refinements=0,
+            reorthogonalize=reorthogonalize,
+            inner_product=inner_product,
+            inner_products=inner_products,
+            breakdown_tolerance=breakdown_tolerance,
+        )
+
+    def __call__(self, state, time, step_size, linear_rhs: Callable):
+        r"""Return ``step_size * phi_1(step_size * L) @ state``.
+
+        ``linear_rhs(state, time)`` supplies ``L(time) @ state``. The operator
+        is sampled at the interval midpoint. Unlike a homogeneous exponential,
+        a phi-function action cannot be composed by simply applying the same
+        action on refined subintervals, so this primitive raises explicitly if
+        one Krylov space does not meet the requested tolerance.
+        """
+
+        if not callable(linear_rhs):
+            raise TypeError("linear_rhs must be callable.")
+        values = state_array(state)
+        time = finite_real(time, "time")
+        step_size = finite_real(step_size, "step_size")
+        attempts = []
+
+        if step_size == 0.0:
+            self._store_diagnostics(attempts)
+            return np.zeros_like(values)
+
+        try:
+            result, attempt = self._krylov_step(
+                values,
+                time,
+                step_size,
+                linear_rhs,
+                refinement_depth=0,
+                tolerance_scale=1.0,
+            )
+            attempts.append(attempt)
+            if not attempt.converged:
+                raise KrylovConvergenceError(
+                    "Krylov phi_1 action did not converge with "
+                    f"max_krylov_dimension={self.max_krylov_dimension}; "
+                    f"estimated error={attempt.error_estimate:.3e}, "
+                    f"tolerance={attempt.tolerance:.3e}. Increase the Krylov "
+                    "dimension or reduce the requested step size."
+                )
+        except Exception:
+            self._store_diagnostics(attempts)
+            raise
+        self._store_diagnostics(attempts)
+        return result
+
+    def _phi1_convergence(
+        self, approximation, error_estimate, initial_norm, step_size
+    ):
+        approximation_norm = self._norm(approximation)
+        reference_norm = abs(step_size) * initial_norm
+        tolerance = self.atol + self.rtol * max(
+            reference_norm, approximation_norm
+        )
+        error_estimate = float(error_estimate)
+        return error_estimate, tolerance, error_estimate <= tolerance
 
 
 class ShortIterativeLanczos(_KrylovExponential):
@@ -512,6 +594,298 @@ class ArnoldiExponential(_KrylovExponential):
             breakdown,
         )
         return approximation, attempt
+
+
+class LanczosPhi1(_KrylovPhi1):
+    r"""Matrix-free ``step_size * phi_1(step_size * L)`` action.
+
+    ``linear_rhs(state, time)`` must represent
+    ``generator_factor * H(time) @ state``, where ``H`` is Hermitian under the
+    configured inner product. The default ``generator_factor=-1j`` follows the
+    real-time TDSE convention. Set ``generator_factor=-1.0`` for the damped
+    action ``step_size * phi_1(-step_size * H)`` used by exponential-Euler
+    imaginary-time relaxation.
+
+    The operator is sampled at the interval midpoint. The Krylov approximation
+    is increased up to ``max_krylov_dimension`` and raises
+    :class:`KrylovConvergenceError` if that space does not meet the requested
+    tolerance. Phi-function actions are not automatically subdivided because
+    they do not compose as homogeneous exponential propagators do.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_krylov_dimension=20,
+        rtol=1.0e-10,
+        atol=0.0,
+        reorthogonalize=True,
+        inner_product=None,
+        inner_products=None,
+        breakdown_tolerance=1.0e-14,
+        generator_factor=-1j,
+    ):
+        super().__init__(
+            max_krylov_dimension=max_krylov_dimension,
+            rtol=rtol,
+            atol=atol,
+            reorthogonalize=reorthogonalize,
+            inner_product=inner_product,
+            inner_products=inner_products,
+            breakdown_tolerance=breakdown_tolerance,
+        )
+        self.generator_factor = _nonzero_finite_numeric_scalar(
+            generator_factor, "generator_factor"
+        )
+
+    def _krylov_step(
+        self,
+        state,
+        time,
+        step_size,
+        linear_rhs,
+        refinement_depth,
+        tolerance_scale,
+    ):
+        del tolerance_scale
+        shape = state.shape
+        initial_norm = self._norm(state)
+        midpoint = time + 0.5 * step_size
+        if initial_norm == 0.0:
+            attempt = KrylovAttempt(
+                time,
+                step_size,
+                refinement_depth,
+                0,
+                0.0,
+                self.atol,
+                0,
+                True,
+                True,
+            )
+            return np.zeros_like(state), attempt
+
+        operator_calls = 0
+
+        def hamiltonian_action(argument):
+            nonlocal operator_calls
+            operator_calls += 1
+            derivative = matching_array(
+                linear_rhs(argument, midpoint), shape, "linear_rhs"
+            )
+            return derivative / self.generator_factor
+
+        basis = [state / initial_norm]
+        alphas = []
+        betas = []
+        approximation = None
+        error = np.inf
+        tolerance = self.atol + self.rtol * abs(step_size) * initial_norm
+        breakdown = False
+
+        for index in range(self.max_krylov_dimension):
+            vector = basis[index]
+            residual = hamiltonian_action(vector)
+            if index:
+                residual = residual - betas[index - 1] * basis[index - 1]
+            alpha = self._inner(vector, residual)
+            alpha_scale = max(1.0, abs(alpha.real))
+            if abs(alpha.imag) > 1.0e-10 * alpha_scale:
+                raise ValueError(
+                    "LanczosPhi1 requires a Hermitian Hamiltonian or operator "
+                    "under the configured inner product."
+                )
+            alpha = float(alpha.real)
+            alphas.append(alpha)
+            residual = residual - alpha * vector
+
+            if self.reorthogonalize:
+                coefficients = self._inners(basis, residual)
+                for basis_vector, coefficient in zip(
+                    basis, coefficients, strict=True
+                ):
+                    if not np.iscomplexobj(residual) and not np.iscomplexobj(
+                        basis_vector
+                    ):
+                        coefficient = coefficient.real
+                    residual = residual - coefficient * basis_vector
+
+            beta = self._norm(residual)
+            dimension = index + 1
+            projected = np.diag(np.asarray(alphas))
+            if betas:
+                off_diagonal = np.asarray(betas[: dimension - 1])
+                projected += np.diag(off_diagonal, 1)
+                projected += np.diag(off_diagonal, -1)
+            coefficients = initial_norm * _projected_phi1_action(
+                self.generator_factor * step_size * projected,
+                step_size,
+            )
+            approximation = self._linear_combination(
+                basis,
+                coefficients,
+                shape,
+                out=approximation,
+            )
+            residual_estimate = (
+                abs(self.generator_factor * step_size)
+                * beta
+                * abs(coefficients[-1])
+            )
+            error, tolerance, converged = self._phi1_convergence(
+                approximation,
+                residual_estimate,
+                initial_norm,
+                step_size,
+            )
+
+            breakdown = beta <= self.breakdown_tolerance
+            if breakdown:
+                error = 0.0
+                converged = True
+            if converged:
+                break
+            if dimension == self.max_krylov_dimension:
+                break
+            betas.append(beta)
+            basis.append(residual / beta)
+
+        attempt = KrylovAttempt(
+            time,
+            step_size,
+            refinement_depth,
+            dimension,
+            float(error),
+            float(tolerance),
+            operator_calls,
+            bool(converged),
+            breakdown,
+        )
+        return approximation, attempt
+
+
+class ArnoldiPhi1(_KrylovPhi1):
+    r"""Matrix-free phi_1 action for a general linear generator.
+
+    ``linear_rhs(state, time)`` represents ``L(time) @ state``. A call returns
+    ``step_size * phi_1(step_size * L) @ state``, with ``L`` sampled at the
+    interval midpoint. The action supports non-Hermitian generators and the
+    same weighted or distributed inner-product callbacks as
+    :class:`ArnoldiExponential`.
+    """
+
+    def _krylov_step(
+        self,
+        state,
+        time,
+        step_size,
+        linear_rhs,
+        refinement_depth,
+        tolerance_scale,
+    ):
+        del tolerance_scale
+        shape = state.shape
+        initial_norm = self._norm(state)
+        midpoint = time + 0.5 * step_size
+        if initial_norm == 0.0:
+            attempt = KrylovAttempt(
+                time,
+                step_size,
+                refinement_depth,
+                0,
+                0.0,
+                self.atol,
+                0,
+                True,
+                True,
+            )
+            return np.zeros_like(state), attempt
+
+        operator_calls = 0
+
+        def generator_action(argument):
+            nonlocal operator_calls
+            operator_calls += 1
+            return matching_array(
+                linear_rhs(argument, midpoint), shape, "linear_rhs"
+            )
+
+        basis = [state / initial_norm]
+        hessenberg = np.zeros(
+            (self.max_krylov_dimension + 1, self.max_krylov_dimension),
+            dtype=complex,
+        )
+        approximation = None
+        error = np.inf
+        tolerance = self.atol + self.rtol * abs(step_size) * initial_norm
+        breakdown = False
+
+        for index in range(self.max_krylov_dimension):
+            residual = generator_action(basis[index])
+            passes = 2 if self.reorthogonalize else 1
+            for _ in range(passes):
+                coefficients = self._inners(basis, residual)
+                for row, (basis_vector, coefficient) in enumerate(
+                    zip(basis, coefficients, strict=True)
+                ):
+                    hessenberg[row, index] += coefficient
+                    residual = residual - coefficient * basis_vector
+
+            beta = self._norm(residual)
+            hessenberg[index + 1, index] = beta
+            dimension = index + 1
+            projected = hessenberg[:dimension, :dimension]
+            coefficients = initial_norm * _projected_phi1_action(
+                step_size * projected,
+                step_size,
+            )
+            approximation = self._linear_combination(
+                basis,
+                coefficients,
+                shape,
+                out=approximation,
+            )
+            residual_estimate = abs(step_size) * beta * abs(coefficients[-1])
+            error, tolerance, converged = self._phi1_convergence(
+                approximation,
+                residual_estimate,
+                initial_norm,
+                step_size,
+            )
+
+            breakdown = beta <= self.breakdown_tolerance
+            if breakdown:
+                error = 0.0
+                converged = True
+            if converged:
+                break
+            if dimension == self.max_krylov_dimension:
+                break
+            basis.append(residual / beta)
+
+        attempt = KrylovAttempt(
+            time,
+            step_size,
+            refinement_depth,
+            dimension,
+            float(error),
+            float(tolerance),
+            operator_calls,
+            bool(converged),
+            breakdown,
+        )
+        return approximation, attempt
+
+
+def _projected_phi1_action(argument, step_size):
+    """Return ``step_size * phi_1(argument) @ e_1`` stably."""
+
+    dimension = argument.shape[0]
+    dtype = np.result_type(argument.dtype, step_size)
+    augmented = np.zeros((dimension + 1, dimension + 1), dtype=dtype)
+    augmented[:dimension, :dimension] = argument
+    augmented[0, dimension] = 1
+    return step_size * expm(augmented)[:dimension, dimension]
 
 
 def _integer(value, name, *, minimum):
