@@ -12,6 +12,7 @@ algorithms currently intended for time-dependent quantum dynamics:
 - [Runtime dependencies](runtime_dependencies.md)
 - [Integrator interface and conventions](integrator_interface.md)
 - [Crank--Nicolson propagation](crank_nicolson.md)
+- [Exponential Euler](exponential_euler.md)
 - [Krylov exponential and phi-function actions](krylov_exponential.md)
 - [Krylov exponential and phi-function validation](krylov_validation.md)
 
