@@ -23,6 +23,8 @@ The public API contains:
   phi function for a Hermitian operator.
 - `ArnoldiPhi1`: matrix-free action of the first exponential-integrator
   phi function for a general linear generator.
+- `ExponentialEuler`: first-order exponential-Euler integration using a
+  caller-selected matrix-free phi-function action.
 - `Strang2`: second-order symmetric `A/2 - B - A/2` composition.
 - `LinearSolveError`: raised when an iterative Crank--Nicolson solve fails.
 - `KrylovConvergenceError`: raised when an exponential or phi-function Krylov
@@ -35,6 +37,7 @@ The public API contains:
 - [Runtime dependencies](docs/runtime_dependencies.md)
 - [Integrator interface and conventions](docs/integrator_interface.md)
 - [Crank--Nicolson propagation](docs/crank_nicolson.md)
+- [Exponential Euler](docs/exponential_euler.md)
 - [Krylov exponential and phi-function actions](docs/krylov_exponential.md)
 - [Krylov exponential and phi-function validation](docs/krylov_validation.md)
 
@@ -287,6 +290,43 @@ does not compose by applying the same action successively on smaller
 intervals, so these primitives do not perform automatic step refinement. If
 the maximum Krylov dimension does not meet the tolerance, they raise
 `KrylovConvergenceError` and retain the failed attempt in `last_attempts`.
+
+## Exponential Euler
+
+`ExponentialEuler` composes a complete rate with a configured phi-function
+action:
+
+```python
+from integrator_lib import ExponentialEuler, LanczosPhi1
+
+integrator = ExponentialEuler(
+    LanczosPhi1(
+        generator_factor=-1.0,
+        max_krylov_dimension=30,
+        rtol=1e-10,
+        inner_product=representation.inner_product,
+        inner_products=representation.inner_products,
+    )
+)
+
+new_state = integrator(
+    state,
+    time,
+    time_step,
+    full_rhs,
+    linear_rhs,
+)
+```
+
+The method evaluates `full_rhs(state, time)` once and returns
+
+```text
+state + time_step * phi_1(time_step * L) @ full_rhs(state, time).
+```
+
+The caller chooses the complete rate, linear split, normalization and
+convergence policy. See [Exponential Euler](docs/exponential_euler.md) for the
+interface, diagnostics and stationary-residual usage.
 
 ## Development
 

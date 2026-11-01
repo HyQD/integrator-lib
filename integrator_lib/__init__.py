@@ -2,6 +2,7 @@
 
 from .constant_mean_field import IMCMF1, IMCMF2
 from .crank_nicolson import CrankNicolson, LinearSolveError
+from .exponential_euler import ExponentialEuler
 from .krylov import (
     ArnoldiExponential,
     ArnoldiPhi1,
@@ -17,6 +18,7 @@ __all__ = [
     "IMCMF1",
     "IMCMF2",
     "CrankNicolson",
+    "ExponentialEuler",
     "ArnoldiExponential",
     "ArnoldiPhi1",
     "KrylovAttempt",
