@@ -25,6 +25,8 @@ The public API contains:
   phi function for a general linear generator.
 - `ExponentialEuler`: first-order exponential-Euler integration using a
   caller-selected matrix-free phi-function action.
+- `CommutatorFreeMagnus4`: fourth-order propagation for a time-dependent
+  linear generator using two matrix-free exponential actions.
 - `Strang2`: second-order symmetric `A/2 - B - A/2` composition.
 - `LinearSolveError`: raised when an iterative Crank--Nicolson solve fails.
 - `KrylovConvergenceError`: raised when an exponential or phi-function Krylov
@@ -38,6 +40,7 @@ The public API contains:
 - [Integrator interface and conventions](docs/integrator_interface.md)
 - [Crank--Nicolson propagation](docs/crank_nicolson.md)
 - [Exponential Euler](docs/exponential_euler.md)
+- [Fourth-order commutator-free Magnus integration](docs/magnus.md)
 - [Krylov exponential and phi-function actions](docs/krylov_exponential.md)
 - [Krylov exponential and phi-function validation](docs/krylov_validation.md)
 
