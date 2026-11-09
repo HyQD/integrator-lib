@@ -11,6 +11,7 @@ from .krylov import (
     LanczosPhi1,
     ShortIterativeLanczos,
 )
+from .magnus import CommutatorFreeMagnus4
 from .runge_kutta import RK4
 from .splitting import Strang2
 
@@ -28,5 +29,6 @@ __all__ = [
     "RK4",
     "Strang2",
     "ShortIterativeLanczos",
+    "CommutatorFreeMagnus4",
 ]
 __version__ = "0.3.0"

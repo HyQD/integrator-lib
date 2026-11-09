@@ -85,10 +85,12 @@ convergence tests belong to the calling application.
 
 ## Compound algorithms
 
-`Strang2`, `IMCMF1`, and `IMCMF2` receive stepper objects obeying compatible
-call conventions. This permits, for example, a Krylov exponential method to
-be used as a linear substep when the mathematical assumptions of that
-composition are satisfied.
+`Strang2`, `IMCMF1`, `IMCMF2`, and `CommutatorFreeMagnus4` receive stepper
+objects obeying compatible call conventions. This permits, for example, a
+Krylov exponential method to be used as a linear substep when the mathematical
+assumptions of that composition are satisfied. `CommutatorFreeMagnus4`
+constructs two frozen combinations of a time-dependent linear generator and
+passes each to its configured exponential stepper.
 
 `ExponentialEuler` uses a related but distinct compound signature:
 
